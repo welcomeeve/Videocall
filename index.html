@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GitHub Video Call</title>
+    <title>GitHub WebRTC Video Call</title>
     <script src="https://cdn.scaledrone.com/scaledrone.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; background: #1a1a1a; color: white; margin: 0; padding: 20px; }
+        .status { margin-bottom: 15px; color: #00ff88; font-weight: bold; }
         .video-container { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; margin-top: 20px; }
         video { width: 100%; max-width: 450px; height: 320px; background: #000; border-radius: 12px; border: 2px solid #444; object-fit: cover; }
     </style>
@@ -14,6 +15,7 @@
 <body>
 
     <h2>GitHub WebRTC Video Call</h2>
+    <div id="status" class="status">ক্যামেরা কানেক্ট হচ্ছে...</div>
     <p>এই পেজের লিঙ্কটি অন্য ব্রাউজারে বা বন্ধুকে পাঠালে কল কানেক্ট হবে।</p>
 
     <div class="video-container">
@@ -22,7 +24,7 @@
     </div>
 
     <script>
-        const SCALEDRONE_CHANNEL_ID = 'OItfCr1sKHTdnuja'; // এখানে Scaledrone Channel ID দিন
+        const SCALEDRONE_CHANNEL_ID = 'OItfCr1sKHTdnuja';
         const roomName = 'observable-videocall-room';
         
         let drone = new Scaledrone(SCALEDRONE_CHANNEL_ID);
@@ -30,19 +32,28 @@
         let pc;
         let localStream;
         
+        // আকামাই ও গুগল স্টান সার্ভার ব্যবহার করা হয়েছে কানেকশন দ্রুত করার জন্য
         const configuration = {
-            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
         };
 
         const localVideo = document.getElementById('localVideo');
         const remoteVideo = document.getElementById('remoteVideo');
+        const statusDiv = document.getElementById('status');
 
         navigator.mediaDevices.getUserMedia({ video: true, audio: true })
             .then(stream => {
                 localVideo.srcObject = stream;
                 localStream = stream;
+                statusDiv.innerText = "ক্যামেরা চালু হয়েছে। অন্যজনের যুক্ত হওয়ার জন্য অপেক্ষা করা হচ্ছে...";
                 initDrone();
-            }).catch(error => alert('ক্যামেরা বা মাইক্রোফোন এক্সেস পাওয়া যায়নি: ' + error));
+            }).catch(error => {
+                statusDiv.innerText = "ক্যামেরা বা মাইক্রোফোন এক্সেস পাওয়া যায়নি!";
+                alert('Error: ' + error);
+            });
 
         function initDrone() {
             drone.on('open', error => {
@@ -51,6 +62,9 @@
                 room = drone.subscribe(roomName);
                 
                 room.on('members', members => {
+                    if (members.length >= 2) {
+                        statusDiv.innerText = "অন্য ইউজার যুক্ত হয়েছেন! কানেক্ট করা হচ্ছে...";
+                    }
                     const isOfferer = members.length === 2;
                     startWebRTC(isOfferer);
                 });
@@ -66,7 +80,9 @@
                         }
                     }, console.error);
                 } else if (text.candidate) {
-                    pc.addIceCandidate(new RTCIceCandidate(text.candidate), console.log, console.error);
+                    pc.addIceCandidate(new RTCIceCandidate(text.candidate), () => {
+                        statusDiv.innerText = "ভিডিও কল সফলভাবে কানেক্ট হয়েছে!";
+                    }, console.error);
                 }
             });
         }
