@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub Video Call</title>
+    <script src="https://cdn.scaledrone.com/scaledrone.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background: #1a1a1a; color: white; margin: 0; padding: 20px; }
+        .video-container { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; margin-top: 20px; }
+        video { width: 100%; max-width: 450px; height: 320px; background: #000; border-radius: 12px; border: 2px solid #444; object-fit: cover; }
+    </style>
+</head>
+<body>
+
+    <h2>GitHub WebRTC Video Call</h2>
+    <p>এই পেজের লিঙ্কটি অন্য ব্রাউজারে বা বন্ধুকে পাঠালে কল কানেক্ট হবে।</p>
+
+    <div class="video-container">
+        <video id="localVideo" autoplay muted playsinline></video>
+        <video id="remoteVideo" autoplay playsinline></video>
+    </div>
+
+    <script>
+        const SCALEDRONE_CHANNEL_ID = 'OItfCr1sKHTdnuja'; // এখানে Scaledrone Channel ID দিন
+        const roomName = 'observable-videocall-room';
+        
+        let drone = new Scaledrone(SCALEDRONE_CHANNEL_ID);
+        let room;
+        let pc;
+        let localStream;
+        
+        const configuration = {
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        };
+
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+            .then(stream => {
+                localVideo.srcObject = stream;
+                localStream = stream;
+                initDrone();
+            }).catch(error => alert('ক্যামেরা বা মাইক্রোফোন এক্সেস পাওয়া যায়নি: ' + error));
+
+        function initDrone() {
+            drone.on('open', error => {
+                if (error) return console.error(error);
+                
+                room = drone.subscribe(roomName);
+                
+                room.on('members', members => {
+                    const isOfferer = members.length === 2;
+                    startWebRTC(isOfferer);
+                });
+            });
+
+            drone.on('data', (text, member) => {
+                if (member.id === drone.clientId) return;
+                
+                if (text.sdp) {
+                    pc.setRemoteDescription(new RTCSessionDescription(text.sdp), () => {
+                        if (pc.remoteDescription.type === 'offer') {
+                            pc.createAnswer().then(localDescCreated).catch(console.error);
+                        }
+                    }, console.error);
+                } else if (text.candidate) {
+                    pc.addIceCandidate(new RTCIceCandidate(text.candidate), console.log, console.error);
+                }
+            });
+        }
+
+        function startWebRTC(isOfferer) {
+            pc = new RTCPeerConnection(configuration);
+
+            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+            pc.ontrack = event => {
+                remoteVideo.srcObject = event.streams[0];
+            };
+
+            pc.onicecandidate = event => {
+                if (event.candidate) {
+                    sendMessage({ candidate: event.candidate });
+                }
+            };
+
+            if (isOfferer) {
+                pc.onnegotiationneeded = () => {
+                    pc.createOffer().then(localDescCreated).catch(console.error);
+                };
+            }
+        }
+
+        function localDescCreated(desc) {
+            pc.setLocalDescription(desc, () => sendMessage({ sdp: pc.localDescription }), console.error);
+        }
+
+        function sendMessage(message) {
+            drone.publish({ room: roomName, message: message });
+        }
+    </script>
+</body>
+</html>
