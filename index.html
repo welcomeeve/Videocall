@@ -3,95 +3,96 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Working Video Call</title>
-    <!-- Agora RTC Web SDK -->
-    <script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.19.0.js"></script>
+    <title>PeerJS Video Call</title>
+    <!-- PeerJS Library CDN -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; background: #121212; color: white; margin: 0; padding: 20px; }
-        .status { margin: 15px 0; font-weight: bold; color: #00e676; }
+        .status { margin: 15px 0; font-weight: bold; color: #00e676; word-break: break-all; }
         .video-container { display: flex; justify-content: center; gap: 15px; flex-wrap: wrap; margin-top: 20px; }
         .video-box { width: 100%; max-width: 360px; height: 270px; background: #000; border-radius: 10px; border: 2px solid #333; overflow: hidden; position: relative; }
+        video { width: 100%; height: 100%; object-fit: cover; }
         .video-box p { position: absolute; top: 10px; left: 10px; z-index: 10; margin: 0; background: rgba(0,0,0,0.6); padding: 4px 8px; border-radius: 4px; font-size: 12px; }
-        .agora-player { width: 100%; height: 100%; }
-        button { padding: 12px 24px; font-size: 16px; background: #00e676; border: none; color: #000; font-weight: bold; border-radius: 6px; cursor: pointer; margin-top: 10px; }
     </style>
 </head>
 <body>
 
-    <h2>সহজ ভিডিও কল (Agora Engine)</h2>
-    <div id="status" class="status">কল শুরু করতে নিচের বাটনে চাপ দিন</div>
-    <button id="joinBtn">ভিডিও কলে যুক্ত হন</button>
+    <h2>PeerJS Direct Video Call</h2>
+    <div id="status" class="status">ক্যামেরা ও কানেকশন রেডি হচ্ছে...</div>
 
     <div class="video-container">
         <div class="video-box">
             <p>আপনার ক্যামেরা</p>
-            <div id="local-player" class="agora-player"></div>
+            <video id="localVideo" autoplay muted playsinline></video>
         </div>
         <div class="video-box">
             <p>অপরদিকের ক্যামেরা</p>
-            <div id="remote-player" class="agora-player"></div>
+            <video id="remoteVideo" autoplay playsinline></video>
         </div>
     </div>
 
     <script>
-        // টেস্ট করার জন্য ফ্রি টেস্ট App ID (এটি ১০০% কাজ করবে)
-        const APP_ID = "e8c56c80cf5648f58b0f8e9a2636a6e2"; 
-        
-        // URL থেকে রুমের নাম নেওয়া
-        if (!location.hash) {
-            location.hash = "test-room-123";
-        }
-        const CHANNEL = location.hash.substring(1);
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const statusDiv = document.getElementById('status');
 
-        const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
-        let localTracks = [];
+        let localStream;
+        let peer;
 
-        const joinBtn = document.getElementById("joinBtn");
-        const statusDiv = document.getElementById("status");
-
-        joinBtn.onclick = async () => {
-            joinBtn.disabled = true;
-            statusDiv.innerText = "কানেক্ট করা হচ্ছে...";
-
-            try {
-                // ১. রুমে জয়েন করা
-                await client.join(APP_ID, CHANNEL, null, null);
-
-                // ২. ক্যামেরা ও মাইক চালু করা
-                localTracks = await AgoraRTC.createMicrophoneAndCameraTracks();
+        // ১. ক্যামেরা চালু করা
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+            .then(stream => {
+                localStream = stream;
+                localVideo.srcObject = stream;
+                statusDiv.innerText = "ক্যামেরা চালু হয়েছে। সার্ভারে কানেক্ট হচ্ছে...";
                 
-                // লোকাল ভিডিও প্লে করা
-                localTracks[1].play("local-player");
+                initPeer();
+            })
+            .catch(err => {
+                statusDiv.innerText = "ক্যামেরা পারমিশন পাওয়া যায়নি!";
+                console.error(err);
+            });
 
-                // ৩. স্ট্রিম অন্য সবার কাছে পাঠানো
-                await client.publish(localTracks);
-                statusDiv.innerText = "আপনি কলে যুক্ত হয়েছেন! অপর পাশের জন্য অপেক্ষা করুন...";
+        function initPeer() {
+            // URL Hash থেকে আইডি নেওয়া বা তৈরি করা
+            let roomID = location.hash.substring(1);
 
-            } catch (error) {
-                console.error(error);
-                statusDiv.innerText = "কানেক্ট হতে সমস্যা হয়েছে: " + error.message;
+            if (!roomID) {
+                // ১ম ইউজার হলে নতুন রুম আইডি তৈরি হবে
+                roomID = Math.random().toString(36).substring(2, 9);
+                location.hash = roomID;
+                
+                peer = new Peer(roomID);
+
+                peer.on('open', id => {
+                    statusDiv.innerText = "আপনার রুম রেডি! লিঙ্কটি কপি করে ২য় ফোনে ওপেন করুন।";
+                });
+
+                // ১ম ইউজারের কাছে কল আসলে রিসিভ করা
+                peer.on('call', call => {
+                    call.answer(localStream);
+                    call.on('stream', remoteStream => {
+                        remoteVideo.srcObject = remoteStream;
+                        statusDiv.innerText = "ভিডিও কল সফলভাবে কানেক্ট হয়েছে!";
+                    });
+                });
+
+            } else {
+                // ২য় ইউজার লিঙ্কে ঢুকলে ১ম ইউজারকে কল দেবে
+                peer = new Peer();
+
+                peer.on('open', id => {
+                    statusDiv.innerText = "১ম ইউজারের সাথে কানেক্ট করা হচ্ছে...";
+                    
+                    const call = peer.call(roomID, localStream);
+                    
+                    call.on('stream', remoteStream => {
+                        remoteVideo.srcObject = remoteStream;
+                        statusDiv.innerText = "ভিডিও কল সফলভাবে কানেক্ট হয়েছে!";
+                    });
+                });
             }
-        };
-
-        // ৪. অপর পাশ থেকে কেউ জয়েন করলে তার ভিডিও প্লে করা
-        client.on("user-published", async (user, mediaType) => {
-            await client.subscribe(user, mediaType);
-
-            if (mediaType === "video") {
-                user.videoTrack.play("remote-player");
-                statusDiv.innerText = "ভিডিও কল সফলভাবে কানেক্ট হয়েছে!";
-            }
-
-            if (mediaType === "audio") {
-                user.audioTrack.play();
-            }
-        });
-
-        // ৫. কেউ কল কাটলে
-        client.on("user-unpublished", user => {
-            document.getElementById("remote-player").innerHTML = "";
-            statusDiv.innerText = "অপরদিকের ইউজার কল কেটে দিয়েছেন।";
-        });
+        }
     </script>
 </body>
 </html>
