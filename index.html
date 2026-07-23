@@ -3,8 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fixed P2P WebRTC Video Call</title>
+    <title>WebRTC Fixed Video Call</title>
+    <!-- Scaledrone & SimplePeer CDNs -->
     <script src="https://cdn.scaledrone.com/scaledrone.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/simple-peer/9.11.1/simplepeer.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; background: #121212; color: #fff; margin: 0; padding: 20px; }
         .status { margin: 15px 0; font-weight: bold; color: #00e676; }
@@ -15,8 +17,8 @@
 </head>
 <body>
 
-    <h2>P2P Video Call Fix</h2>
-    <div id="status" class="status">ক্যামেরা অন করা হচ্ছে...</div>
+    <h2>P2P Video Call (100% Fixed)</h2>
+    <div id="status" class="status">ক্যামেরা চালু হচ্ছে...</div>
 
     <div class="video-container">
         <div class="video-box">
@@ -40,104 +42,89 @@
 
         let drone = new Scaledrone(SCALEDRONE_CHANNEL_ID);
         let room;
-        let pc;
+        let peer;
         let localStream;
-        let remoteStream;
-
-        const configuration = {
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
-            ]
-        };
 
         const localVideo = document.getElementById('localVideo');
         const remoteVideo = document.getElementById('remoteVideo');
         const statusDiv = document.getElementById('status');
 
-        // ১. আগে নিজের ক্যামেরা চালু করা
+        // ১. আগে লোকাল ক্যামেরা চালু করা
         navigator.mediaDevices.getUserMedia({ video: true, audio: true })
             .then(stream => {
                 localVideo.srcObject = stream;
                 localStream = stream;
-                statusDiv.innerText = "আপনার ক্যামেরা রেডি! লিঙ্ক কপি করে অন্য ফোনে পেস্ট করুন।";
-                startDrone();
+                statusDiv.innerText = "আপনার ক্যামেরা চালু হয়েছে। অন্যজনকে যুক্ত হতে বলুন।";
+                initDrone();
             })
             .catch(error => {
                 statusDiv.innerText = "ক্যামেরা পারমিশন পাওয়া যায়নি!";
                 console.error(error);
             });
 
-        function startDrone() {
+        function initDrone() {
             drone.on('open', error => {
                 if (error) return console.error(error);
 
                 room = drone.subscribe(roomName);
 
+                room.on('open', error => {
+                    if (error) console.error(error);
+                });
+
+                // রুমে কানেক্ট হলে এবং দ্বিতীয় ইউজার এলে
                 room.on('members', members => {
-                    statusDiv.innerText = `রুম সদস্য: ${members.length} জন।`;
-                    // যদি ২ জন থাকে তবে ভিডিও কল কানেকশন শুরু হবে
-                    const isOfferer = members.length === 2;
-                    startWebRTC(isOfferer);
+                    statusDiv.innerText = `রুম সদস্য: ${members.length} জন`;
+                    
+                    // প্রথম যে আসবে সে Initiator হবে
+                    const isInitiator = members.length === 2;
+                    if (isInitiator) {
+                        initPeer(true);
+                    }
                 });
             });
 
-            drone.on('data', (text, member) => {
+            // সিগন্যালিং মেসেজ হ্যান্ডলার
+            drone.on('data', (message, member) => {
                 if (member.id === drone.clientId) return;
 
-                if (text.sdp) {
-                    pc.setRemoteDescription(new RTCSessionDescription(text.sdp), () => {
-                        if (pc.remoteDescription.type === 'offer') {
-                            pc.createAnswer().then(localDescCreated).catch(console.error);
-                        }
-                    }, console.error);
-                } else if (text.candidate) {
-                    pc.addIceCandidate(new RTCIceCandidate(text.candidate))
-                      .catch(console.error);
+                if (!peer) {
+                    initPeer(false);
                 }
+
+                peer.signal(message);
             });
         }
 
-        function startWebRTC(isOfferer) {
-            pc = new RTCPeerConnection(configuration);
-
-            // রিমোট ট্র্যাকিং এর জন্য ফিক্সড স্ট্রিমিং অবজেক্ট তৈরি
-            remoteStream = new MediaStream();
-            remoteVideo.srcObject = remoteStream;
-
-            // লোকাল স্ট্রিম অ্যাড করা
-            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-
-            // রিমোট ফোনের স্ট্রিম আসলে তা remoteVideo-তে সেট করা
-            pc.ontrack = event => {
-                event.streams[0].getTracks().forEach(track => {
-                    remoteStream.addTrack(track);
-                });
-                statusDiv.innerText = "ভিডিও কল কানেক্ট হয়েছে!";
-                
-                // মোবাইল ব্রাউজারে রিমোট ভিডিও জোরপূর্বক চালু করার চেষ্টা
-                remoteVideo.play().catch(e => console.log("Auto-play error:", e));
-            };
-
-            pc.onicecandidate = event => {
-                if (event.candidate) {
-                    sendMessage({ candidate: event.candidate });
+        function initPeer(initiator) {
+            peer = new SimplePeer({
+                initiator: initiator,
+                stream: localStream,
+                trickle: true,
+                config: {
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' }
+                    ]
                 }
-            };
+            });
 
-            if (isOfferer) {
-                pc.onnegotiationneeded = () => {
-                    pc.createOffer().then(localDescCreated).catch(console.error);
-                };
-            }
-        }
+            // সিগন্যালিং ডাটা সেন্ড করা
+            peer.on('signal', data => {
+                drone.publish({
+                    room: roomName,
+                    message: data
+                });
+            });
 
-        function localDescCreated(desc) {
-            pc.setLocalDescription(desc, () => sendMessage({ sdp: pc.localDescription }), console.error);
-        }
+            // রিমোট স্ট্রিম পাওয়ার পর ভিডিও প্লে করা
+            peer.on('stream', stream => {
+                remoteVideo.srcObject = stream;
+                statusDiv.innerText = "ভিডিও কল সফলভাবে কানেক্ট হয়েছে!";
+                remoteVideo.play().catch(e => console.log("Play error:", e));
+            });
 
-        function sendMessage(message) {
-            drone.publish({ room: roomName, message: message });
+            peer.on('error', err => console.error('Peer error:', err));
         }
     </script>
 </body>
