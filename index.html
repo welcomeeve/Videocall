@@ -3,37 +3,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fixed WebRTC Video Call</title>
+    <title>Fixed P2P WebRTC Video Call</title>
     <script src="https://cdn.scaledrone.com/scaledrone.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; background: #121212; color: #fff; margin: 0; padding: 20px; }
         .status { margin: 15px 0; font-weight: bold; color: #00e676; }
         .video-container { display: flex; justify-content: center; gap: 15px; flex-wrap: wrap; margin-top: 20px; }
-        video { width: 100%; max-width: 400px; height: 280px; background: #000; border-radius: 10px; border: 2px solid #333; object-fit: cover; }
+        .video-box { display: flex; flex-direction: column; align-items: center; }
+        video { width: 100%; max-width: 360px; height: 270px; background: #000; border-radius: 10px; border: 2px solid #333; object-fit: cover; }
     </style>
 </head>
 <body>
 
-    <h2>ভিডিও কল টেস্ট</h2>
-    <div id="status" class="status">ক্যামেরা চালু হচ্ছে...</div>
-    <p>নিচের ভিডিওগুলো চেক করুন:</p>
+    <h2>P2P Video Call Fix</h2>
+    <div id="status" class="status">ক্যামেরা অন করা হচ্ছে...</div>
 
     <div class="video-container">
-        <div>
-            <p>আপনার ভিডিও</p>
+        <div class="video-box">
+            <p>আপনার ক্যামেরা (Local)</p>
             <video id="localVideo" autoplay muted playsinline></video>
         </div>
-        <div>
-            <p>অন্যজনের ভিডিও</p>
+        <div class="video-box">
+            <p>অপরদিকের ক্যামেরা (Remote)</p>
             <video id="remoteVideo" autoplay playsinline></video>
         </div>
     </div>
 
     <script>
-        // ১. আপনার Scaledrone Channel ID
         const SCALEDRONE_CHANNEL_ID = 'OItfCr1sKHTdnuja';
         
-        // ২. URL থেকে রুমের নাম নেওয়া (না থাকলে ডিফল্ট রুম তৈরি করা)
         if (!location.hash) {
             location.hash = Math.floor(Math.random() * 0xFFFFFF).toString(16);
         }
@@ -44,13 +42,12 @@
         let room;
         let pc;
         let localStream;
+        let remoteStream;
 
-        // Google STUN Servers
         const configuration = {
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' }
+                { urls: 'stun:stun1.l.google.com:19302' }
             ]
         };
 
@@ -58,16 +55,16 @@
         const remoteVideo = document.getElementById('remoteVideo');
         const statusDiv = document.getElementById('status');
 
-        // ক্যামেরা এক্সেস নেওয়া
+        // ১. আগে নিজের ক্যামেরা চালু করা
         navigator.mediaDevices.getUserMedia({ video: true, audio: true })
             .then(stream => {
                 localVideo.srcObject = stream;
                 localStream = stream;
-                statusDiv.innerText = "ক্যামেরা রেডি! লিঙ্কটি কপি করে অন্য ফোনে পাঠান।";
+                statusDiv.innerText = "আপনার ক্যামেরা রেডি! লিঙ্ক কপি করে অন্য ফোনে পেস্ট করুন।";
                 startDrone();
             })
             .catch(error => {
-                statusDiv.innerText = "ক্যামেরা এক্সেস পাওয়া যায়নি!";
+                statusDiv.innerText = "ক্যামেরা পারমিশন পাওয়া যায়নি!";
                 console.error(error);
             });
 
@@ -77,20 +74,14 @@
 
                 room = drone.subscribe(roomName);
 
-                room.on('open', error => {
-                    if (error) console.error(error);
-                });
-
-                // রুমে কতজন আছে দেখা
                 room.on('members', members => {
                     statusDiv.innerText = `রুম সদস্য: ${members.length} জন।`;
-                    // দ্বিতীয় ইউজার যুক্ত হলে যে আগে এসেছে সে Offer পাঠাবে
+                    // যদি ২ জন থাকে তবে ভিডিও কল কানেকশন শুরু হবে
                     const isOfferer = members.length === 2;
                     startWebRTC(isOfferer);
                 });
             });
 
-            // সিগন্যালিং মেসেজ হ্যান্ডলার
             drone.on('data', (text, member) => {
                 if (member.id === drone.clientId) return;
 
@@ -101,9 +92,8 @@
                         }
                     }, console.error);
                 } else if (text.candidate) {
-                    pc.addIceCandidate(new RTCIceCandidate(text.candidate), () => {
-                        statusDiv.innerText = "ভিডিও কল সফলভাবে কানেক্ট হয়েছে!";
-                    }, console.error);
+                    pc.addIceCandidate(new RTCIceCandidate(text.candidate))
+                      .catch(console.error);
                 }
             });
         }
@@ -111,24 +101,34 @@
         function startWebRTC(isOfferer) {
             pc = new RTCPeerConnection(configuration);
 
-            // লোকাল ট্র্যাক যোগ করা
+            // রিমোট ট্র্যাকিং এর জন্য ফিক্সড স্ট্রিমিং অবজেক্ট তৈরি
+            remoteStream = new MediaStream();
+            remoteVideo.srcObject = remoteStream;
+
+            // লোকাল স্ট্রিম অ্যাড করা
             localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
-            // রিমোট ট্র্যাক পাওয়া
+            // রিমোট ফোনের স্ট্রিম আসলে তা remoteVideo-তে সেট করা
             pc.ontrack = event => {
-                remoteVideo.srcObject = event.streams[0];
+                event.streams[0].getTracks().forEach(track => {
+                    remoteStream.addTrack(track);
+                });
+                statusDiv.innerText = "ভিডিও কল কানেক্ট হয়েছে!";
+                
+                // মোবাইল ব্রাউজারে রিমোট ভিডিও জোরপূর্বক চালু করার চেষ্টা
+                remoteVideo.play().catch(e => console.log("Auto-play error:", e));
             };
 
-            // ICE Candidate পাঠানো
             pc.onicecandidate = event => {
                 if (event.candidate) {
                     sendMessage({ candidate: event.candidate });
                 }
             };
 
-            // Offer তৈরি
             if (isOfferer) {
-                pc.createOffer().then(localDescCreated).catch(console.error);
+                pc.onnegotiationneeded = () => {
+                    pc.createOffer().then(localDescCreated).catch(console.error);
+                };
             }
         }
 
