@@ -52,47 +52,65 @@
                 statusDiv.innerText = "ক্যামেরা পারমিশন পাওয়া যায়নি!";
                 console.error(err);
             });
+function initPeer() {
+    let roomID = location.hash.substring(1);
 
-        function initPeer() {
-            // URL Hash থেকে আইডি নেওয়া বা তৈরি করা
-            let roomID = location.hash.substring(1);
-
-            if (!roomID) {
-                // ১ম ইউজার হলে নতুন রুম আইডি তৈরি হবে
-                roomID = Math.random().toString(36).substring(2, 9);
-                location.hash = roomID;
-                
-                peer = new Peer(roomID);
-
-                peer.on('open', id => {
-                    statusDiv.innerText = "আপনার রুম রেডি! লিঙ্কটি কপি করে ২য় ফোনে ওপেন করুন।";
-                });
-
-                // ১ম ইউজারের কাছে কল আসলে রিসিভ করা
-                peer.on('call', call => {
-                    call.answer(localStream);
-                    call.on('stream', remoteStream => {
-                        remoteVideo.srcObject = remoteStream;
-                        statusDiv.innerText = "ভিডিও কল সফলভাবে কানেক্ট হয়েছে!";
-                    });
-                });
-
-            } else {
-                // ২য় ইউজার লিঙ্কে ঢুকলে ১ম ইউজারকে কল দেবে
-                peer = new Peer();
-
-                peer.on('open', id => {
-                    statusDiv.innerText = "১ম ইউজারের সাথে কানেক্ট করা হচ্ছে...";
-                    
-                    const call = peer.call(roomID, localStream);
-                    
-                    call.on('stream', remoteStream => {
-                        remoteVideo.srcObject = remoteStream;
-                        statusDiv.innerText = "ভিডিও কল সফলভাবে কানেক্ট হয়েছে!";
-                    });
-                });
-            }
+    // TURN Server কনফিগারেশন যোগ করা হলো
+    const peerConfig = {
+        config: {
+            'iceServers': [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                // এগুলো পাবলিক TURN সার্ভার, যা ফায়ারওয়াল পার হতে সাহায্য করবে
+                { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+                { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }
+            ]
         }
+    };
+
+    if (!roomID) {
+        // ১ম ইউজার (Host)
+        roomID = Math.random().toString(36).substring(2, 9);
+        location.hash = roomID;
+        
+        // এখানে কনফিগারেশন যোগ করুন
+        peer = new Peer(roomID, peerConfig);
+
+        peer.on('open', id => {
+            statusDiv.innerText = "আপনার রুম রেডি! লিঙ্কটি কপি করে ২য় ফোনে পাঠান।";
+        });
+
+        peer.on('call', call => {
+            call.answer(localStream);
+            call.on('stream', remoteStream => {
+                remoteVideo.srcObject = remoteStream;
+                statusDiv.innerText = "ভিডিও কল সফলভাবে কানেক্ট হয়েছে!";
+            });
+        });
+
+    } else {
+        // ২য় ইউজার (Guest)
+        // এখানেও কনফিগারেশন যোগ করুন
+        peer = new Peer(undefined, peerConfig);
+
+        peer.on('open', id => {
+            statusDiv.innerText = "১ম ইউজারের সাথে কানেক্ট করা হচ্ছে...";
+            const call = peer.call(roomID, localStream);
+            
+            call.on('stream', remoteStream => {
+                remoteVideo.srcObject = remoteStream;
+                statusDiv.innerText = "ভিডিও কল সফলভাবে কানেক্ট হয়েছে!";
+            });
+        });
+    }
+
+    // এরর হ্যান্ডলিং
+    peer.on("error", err => {
+        statusDiv.innerText = "Error: " + err.type;
+        console.error(err);
+    });
+}
+
     </script>
 </body>
 </html>
