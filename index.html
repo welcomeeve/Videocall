@@ -3,8 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PeerJS Video Call</title>
-    <!-- PeerJS Library CDN -->
+    <title>PeerJS Stable Video Call</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; background: #121212; color: white; margin: 0; padding: 20px; }
@@ -17,7 +16,7 @@
 </head>
 <body>
 
-    <h2>PeerJS Direct Video Call</h2>
+    <h2>PeerJS Video Call (Relay Fixed)</h2>
     <div id="status" class="status">ক্যামেরা ও কানেকশন রেডি হচ্ছে...</div>
 
     <div class="video-container">
@@ -45,72 +44,82 @@
                 localStream = stream;
                 localVideo.srcObject = stream;
                 statusDiv.innerText = "ক্যামেরা চালু হয়েছে। সার্ভারে কানেক্ট হচ্ছে...";
-                
                 initPeer();
             })
             .catch(err => {
                 statusDiv.innerText = "ক্যামেরা পারমিশন পাওয়া যায়নি!";
                 console.error(err);
             });
-function initPeer() {
-    let roomID = location.hash.substring(1);
 
-    // TURN Server কনফিগারেশন যোগ করা হলো
-    const peerConfig = {
-        config: {
-            'iceServers': [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-                // এগুলো পাবলিক TURN সার্ভার, যা ফায়ারওয়াল পার হতে সাহায্য করবে
-                { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-                { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }
-            ]
+        function initPeer() {
+            let roomID = location.hash.substring(1);
+
+            // বিশ্বস্ত TURN/STUN সার্ভার কনফিগারেশন
+            const peerConfig = {
+                config: {
+                    'iceServers': [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' },
+                        { urls: 'stun:stun2.l.google.com:19302' },
+                        { urls: 'stun:global.stun.twilio.com:3478' },
+                        { 
+                          urls: 'turn:relays.metered.ca:80',
+                          username: 'e01237a77e594dfc1cdd4ef1',
+                          credential: 'S8Q2c06YJ9wSg/s+'
+                        },
+                        { 
+                          urls: 'turn:relays.metered.ca:443?transport=tcp',
+                          username: 'e01237a77e594dfc1cdd4ef1',
+                          credential: 'S8Q2c06YJ9wSg/s+'
+                        }
+                    ]
+                }
+            };
+
+            if (!roomID) {
+                // ১ম ইউজার (Host)
+                roomID = Math.random().toString(36).substring(2, 9);
+                location.hash = roomID;
+                
+                peer = new Peer(roomID, peerConfig);
+
+                peer.on('open', id => {
+                    statusDiv.innerText = "আপনার রুম রেডি! লিঙ্কটি সম্পূর্ণ কপি করে ২য় ফোনে পাঠান।";
+                });
+
+                peer.on('call', call => {
+                    call.answer(localStream);
+                    call.on('stream', remoteStream => {
+                        remoteVideo.srcObject = remoteStream;
+                        remoteVideo.play().catch(e => console.log(e));
+                        statusDiv.innerText = "ভিডিও কল সফলভাবে কানেক্ট হয়েছে!";
+                    });
+                });
+
+            } else {
+                // ২য় ইউজার (Guest)
+                peer = new Peer(peerConfig);
+
+                peer.on('open', id => {
+                    statusDiv.innerText = "১ম ইউজারের সাথে কানেক্ট করা হচ্ছে...";
+                    
+                    // ১ সেকেন্ড ডিলে দেওয়া হয়েছে যেন ১ম ইউজার রিসিভ করতে সম্পূর্ণ প্রস্তুত থাকে
+                    setTimeout(() => {
+                        const call = peer.call(roomID, localStream);
+                        call.on('stream', remoteStream => {
+                            remoteVideo.srcObject = remoteStream;
+                            remoteVideo.play().catch(e => console.log(e));
+                            statusDiv.innerText = "ভিডিও কল সফলভাবে কানেক্ট হয়েছে!";
+                        });
+                    }, 1000);
+                });
+            }
+
+            peer.on("error", err => {
+                statusDiv.innerText = "Error: " + err.type;
+                console.error(err);
+            });
         }
-    };
-
-    if (!roomID) {
-        // ১ম ইউজার (Host)
-        roomID = Math.random().toString(36).substring(2, 9);
-        location.hash = roomID;
-        
-        // এখানে কনফিগারেশন যোগ করুন
-        peer = new Peer(roomID, peerConfig);
-
-        peer.on('open', id => {
-            statusDiv.innerText = "আপনার রুম রেডি! লিঙ্কটি কপি করে ২য় ফোনে পাঠান।";
-        });
-
-        peer.on('call', call => {
-            call.answer(localStream);
-            call.on('stream', remoteStream => {
-                remoteVideo.srcObject = remoteStream;
-                statusDiv.innerText = "ভিডিও কল সফলভাবে কানেক্ট হয়েছে!";
-            });
-        });
-
-    } else {
-        // ২য় ইউজার (Guest)
-        // এখানেও কনফিগারেশন যোগ করুন
-        peer = new Peer(undefined, peerConfig);
-
-        peer.on('open', id => {
-            statusDiv.innerText = "১ম ইউজারের সাথে কানেক্ট করা হচ্ছে...";
-            const call = peer.call(roomID, localStream);
-            
-            call.on('stream', remoteStream => {
-                remoteVideo.srcObject = remoteStream;
-                statusDiv.innerText = "ভিডিও কল সফলভাবে কানেক্ট হয়েছে!";
-            });
-        });
-    }
-
-    // এরর হ্যান্ডলিং
-    peer.on("error", err => {
-        statusDiv.innerText = "Error: " + err.type;
-        console.error(err);
-    });
-}
-
     </script>
 </body>
 </html>
