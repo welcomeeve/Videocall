@@ -1,125 +1,214 @@
 <!DOCTYPE html>
 <html lang="bn">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PeerJS Stable Video Call</title>
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-    <style>
-        body { font-family: Arial, sans-serif; text-align: center; background: #121212; color: white; margin: 0; padding: 20px; }
-        .status { margin: 15px 0; font-weight: bold; color: #00e676; word-break: break-all; }
-        .video-container { display: flex; justify-content: center; gap: 15px; flex-wrap: wrap; margin-top: 20px; }
-        .video-box { width: 100%; max-width: 360px; height: 270px; background: #000; border-radius: 10px; border: 2px solid #333; overflow: hidden; position: relative; }
-        video { width: 100%; height: 100%; object-fit: cover; }
-        .video-box p { position: absolute; top: 10px; left: 10px; z-index: 10; margin: 0; background: rgba(0,0,0,0.6); padding: 4px 8px; border-radius: 4px; font-size: 12px; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ভিডিও কল</title>
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  :root { --bg:#111418; --panel:#1b2027; --line:#2c343e; --text:#eef1f4; --muted:#93a0ae; --accent:#3ea6ff; --ok:#3ddc97; --bad:#ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--text); font-family: system-ui, "Noto Sans Bengali", Arial, sans-serif; }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 4px 0 16px; text-align:center; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
+  .join { display:flex; gap:8px; flex-wrap:wrap; }
+  input { flex:1 1 160px; min-width:0; padding:14px; font-size:20px; letter-spacing:3px; text-align:center; border-radius:10px; border:1px solid var(--line); background:#0d1013; color:var(--text); }
+  input:focus, button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  button { padding:14px 18px; font-size:16px; border:0; border-radius:10px; background:var(--accent); color:#04111f; font-weight:700; cursor:pointer; }
+  button.alt { background:transparent; color:var(--text); border:1px solid var(--line); font-weight:500; }
+  .hint { color:var(--muted); font-size:13px; margin:10px 0 0; }
+  #status { text-align:center; font-weight:600; margin:0 0 14px; color:var(--ok); min-height:22px; }
+  #status.err { color:var(--bad); }
+  .videos { display:flex; flex-wrap:wrap; gap:12px; justify-content:center; }
+  .vbox { position:relative; flex:1 1 300px; max-width:360px; aspect-ratio:4/3; background:#000; border-radius:12px; overflow:hidden; border:1px solid var(--line); }
+  video { width:100%; height:100%; object-fit:cover; }
+  .vbox span { position:absolute; top:8px; left:8px; background:rgba(0,0,0,.6); padding:3px 8px; border-radius:6px; font-size:12px; }
+  #share { display:none; text-align:center; }
+  #roomCode { font-size:34px; font-weight:800; letter-spacing:6px; margin:4px 0 10px; }
+  #qr { display:inline-block; padding:10px; background:#fff; border-radius:10px; margin:6px 0 12px; }
+  .row { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; }
+  [hidden] { display:none !important; }
+</style>
 </head>
 <body>
+<div class="wrap">
+  <h1>ভিডিও কল</h1>
+  <p id="status"></p>
 
-    <h2>PeerJS Video Call (Relay Fixed)</h2>
-    <div id="status" class="status">ক্যামেরা ও কানেকশন রেডি হচ্ছে...</div>
-
-    <div class="video-container">
-        <div class="video-box">
-            <p>আপনার ক্যামেরা</p>
-            <video id="localVideo" autoplay muted playsinline></video>
-        </div>
-        <div class="video-box">
-            <p>অপরদিকের ক্যামেরা</p>
-            <video id="remoteVideo" autoplay playsinline></video>
-        </div>
+  <div class="panel" id="joinPanel">
+    <div class="join">
+      <input id="codeInput" maxlength="12" placeholder="রুম কোড" autocomplete="off" inputmode="text">
+      <button id="joinBtn">জয়েন</button>
     </div>
+    <div class="row" style="margin-top:10px">
+      <button class="alt" id="randBtn" type="button">নতুন কোড বানান</button>
+    </div>
+    <p class="hint">দুজনেই একই কোড লিখে জয়েন করুন। কোডটি ফোনে বা মুখে বলে দিলেই হবে, লিঙ্ক পাঠাতে হবে না।</p>
+  </div>
 
-    <script>
-        const localVideo = document.getElementById('localVideo');
-        const remoteVideo = document.getElementById('remoteVideo');
-        const statusDiv = document.getElementById('status');
+  <div class="panel" id="share">
+    <div class="hint">অপরজনকে এই কোড বলুন বা QR স্ক্যান করান</div>
+    <div id="roomCode"></div>
+    <div id="qr"></div>
+    <div class="row">
+      <button id="shareBtn" type="button">WhatsApp / অ্যাপে পাঠান</button>
+      <button class="alt" id="copyBtn" type="button">কোড কপি</button>
+    </div>
+  </div>
 
-        let localStream;
-        let peer;
+  <div class="videos">
+    <div class="vbox"><span>আপনি</span><video id="localVideo" autoplay muted playsinline></video></div>
+    <div class="vbox"><span>অপরজন</span><video id="remoteVideo" autoplay playsinline></video></div>
+  </div>
+</div>
 
-        // ১. ক্যামেরা চালু করা
-        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-            .then(stream => {
-                localStream = stream;
-                localVideo.srcObject = stream;
-                statusDiv.innerText = "ক্যামেরা চালু হয়েছে। সার্ভারে কানেক্ট হচ্ছে...";
-                initPeer();
-            })
-            .catch(err => {
-                statusDiv.innerText = "ক্যামেরা পারমিশন পাওয়া যায়নি!";
-                console.error(err);
-            });
+<script>
+const PREFIX = 'bdvc-';
+const $ = id => document.getElementById(id);
+const statusEl = $('status'), localVideo = $('localVideo'), remoteVideo = $('remoteVideo');
 
-        function initPeer() {
-            let roomID = location.hash.substring(1);
+const peerConfig = {
+  config: {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:global.stun.twilio.com:3478' },
+      { urls: 'turn:relays.metered.ca:80', username: 'e01237a77e594dfc1cdd4ef1', credential: 'S8Q2c06YJ9wSg/s+' },
+      { urls: 'turn:relays.metered.ca:443?transport=tcp', username: 'e01237a77e594dfc1cdd4ef1', credential: 'S8Q2c06YJ9wSg/s+' }
+    ]
+  }
+};
 
-            // বিশ্বস্ত TURN/STUN সার্ভার কনফিগারেশন
-            const peerConfig = {
-                config: {
-                    'iceServers': [
-                        { urls: 'stun:stun.l.google.com:19302' },
-                        { urls: 'stun:stun1.l.google.com:19302' },
-                        { urls: 'stun:stun2.l.google.com:19302' },
-                        { urls: 'stun:global.stun.twilio.com:3478' },
-                        { 
-                          urls: 'turn:relays.metered.ca:80',
-                          username: 'e01237a77e594dfc1cdd4ef1',
-                          credential: 'S8Q2c06YJ9wSg/s+'
-                        },
-                        { 
-                          urls: 'turn:relays.metered.ca:443?transport=tcp',
-                          username: 'e01237a77e594dfc1cdd4ef1',
-                          credential: 'S8Q2c06YJ9wSg/s+'
-                        }
-                    ]
-                }
-            };
+let localStream, peer, currentCall, roomCode, connected = false;
 
-            if (!roomID) {
-                // ১ম ইউজার (Host)
-                roomID = Math.random().toString(36).substring(2, 9);
-                location.hash = roomID;
-                
-                peer = new Peer(roomID, peerConfig);
+function setStatus(msg, isErr) { statusEl.textContent = msg; statusEl.className = isErr ? 'err' : ''; }
+function cleanCode(v) { return v.trim().toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
-                peer.on('open', id => {
-                    statusDiv.innerText = "আপনার রুম রেডি! লিঙ্কটি সম্পূর্ণ কপি করে ২য় ফোনে পাঠান।";
-                });
+$('randBtn').onclick = () => {
+  $('codeInput').value = String(Math.floor(1000 + Math.random() * 9000));
+};
+$('joinBtn').onclick = () => startRoom($('codeInput').value);
+$('codeInput').addEventListener('keydown', e => { if (e.key === 'Enter') startRoom(e.target.value); });
 
-                peer.on('call', call => {
-                    call.answer(localStream);
-                    call.on('stream', remoteStream => {
-                        remoteVideo.srcObject = remoteStream;
-                        remoteVideo.play().catch(e => console.log(e));
-                        statusDiv.innerText = "ভিডিও কল সফলভাবে কানেক্ট হয়েছে!";
-                    });
-                });
+async function startRoom(raw) {
+  const code = cleanCode(raw);
+  if (code.length < 4) { setStatus('কমপক্ষে ৪ অক্ষর/সংখ্যার কোড দিন', true); return; }
+  roomCode = code;
+  location.hash = code;
+  $('joinBtn').disabled = true;
+  setStatus('ক্যামেরা চালু হচ্ছে...');
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  } catch (e) {
+    $('joinBtn').disabled = false;
+    setStatus('ক্যামেরা/মাইক্রোফোনের পারমিশন দিন (সাইটটি https হতে হবে)', true);
+    return;
+  }
+  localVideo.srcObject = localStream;
+  $('joinPanel').hidden = true;
+  connect();
+}
 
-            } else {
-                // ২য় ইউজার (Guest)
-                peer = new Peer(peerConfig);
+// প্রথমে হোস্ট হওয়ার চেষ্টা; কোড আগে থেকে নেওয়া থাকলে গেস্ট হয়ে কল করবে
+function connect() {
+  if (peer) { try { peer.destroy(); } catch (e) {} }
+  connected = false;
+  setStatus('কানেক্ট হচ্ছে...');
+  const p = new Peer(PREFIX + roomCode, peerConfig);
+  peer = p;
 
-                peer.on('open', id => {
-                    statusDiv.innerText = "১ম ইউজারের সাথে কানেক্ট করা হচ্ছে...";
-                    
-                    // ১ সেকেন্ড ডিলে দেওয়া হয়েছে যেন ১ম ইউজার রিসিভ করতে সম্পূর্ণ প্রস্তুত থাকে
-                    setTimeout(() => {
-                        const call = peer.call(roomID, localStream);
-                        call.on('stream', remoteStream => {
-                            remoteVideo.srcObject = remoteStream;
-                            remoteVideo.play().catch(e => console.log(e));
-                            statusDiv.innerText = "ভিডিও কল সফলভাবে কানেক্ট হয়েছে!";
-                        });
-                    }, 1000);
-                });
-            }
+  p.on('call', call => {
+    call.answer(localStream);
+    handleCall(call);
+  });
 
-            peer.on("error", err => {
-                statusDiv.innerText = "Error: " + err.type;
-                console.error(err);
-            });
-        }
-    </script>
+  p.on('open', () => {
+    showShare();
+    setStatus('অপরজনের জন্য অপেক্ষা করছি... কোড: ' + roomCode);
+  });
+
+  p.on('error', err => {
+    if (err.type === 'unavailable-id') {
+      p.destroy();
+      becomeGuest();
+    } else {
+      setStatus('সমস্যা: ' + err.type + ' — আবার চেষ্টা করছি...', true);
+      setTimeout(connect, 3000);
+    }
+  });
+}
+
+function becomeGuest() {
+  $('share').style.display = 'none';
+  setStatus('রুমে যোগ দেওয়া হচ্ছে...');
+  const p = new Peer(peerConfig);
+  peer = p;
+
+  p.on('open', () => {
+    const call = p.call(PREFIX + roomCode, localStream);
+    handleCall(call);
+  });
+
+  p.on('error', err => {
+    if (connected) return;
+    if (err.type === 'peer-unavailable') {
+      // হোস্ট চলে গেছে — আবার হোস্ট/গেস্ট ঠিক করার জন্য শুরু থেকে চেষ্টা
+      setTimeout(connect, 1500);
+    } else {
+      setStatus('সমস্যা: ' + err.type + ' — আবার চেষ্টা করছি...', true);
+      setTimeout(connect, 3000);
+    }
+  });
+}
+
+function handleCall(call) {
+  currentCall = call;
+  call.on('stream', stream => {
+    connected = true;
+    remoteVideo.srcObject = stream;
+    remoteVideo.play().catch(() => {});
+    $('share').style.display = 'none';
+    setStatus('কল কানেক্ট হয়েছে!');
+  });
+  call.on('close', () => {
+    remoteVideo.srcObject = null;
+    connected = false;
+    setStatus('কল শেষ হয়েছে। নতুন করে কানেক্ট হচ্ছে...');
+    setTimeout(connect, 1500);
+  });
+}
+
+let qrDrawn = false;
+function showShare() {
+  $('share').style.display = 'block';
+  $('roomCode').textContent = roomCode;
+  if (!qrDrawn && window.QRCode) {
+    $('qr').innerHTML = '';
+    new QRCode($('qr'), { text: location.origin + location.pathname + '#' + roomCode, width: 160, height: 160 });
+    qrDrawn = true;
+  }
+}
+
+$('shareBtn').onclick = async () => {
+  const url = location.origin + location.pathname + '#' + roomCode;
+  const text = 'ভিডিও কলে যোগ দিন। রুম কোড: ' + roomCode;
+  if (navigator.share) {
+    try { await navigator.share({ title: 'ভিডিও কল', text, url }); } catch (e) {}
+  } else {
+    window.open('https://wa.me/?text=' + encodeURIComponent(text + '\n' + url), '_blank');
+  }
+};
+$('copyBtn').onclick = async () => {
+  try { await navigator.clipboard.writeText(roomCode); setStatus('কোড কপি হয়েছে'); } catch (e) {}
+};
+
+// লিঙ্ক/QR দিয়ে এলে স্বয়ংক্রিয়ভাবে কোড বসে যাবে
+if (location.hash.length > 1) {
+  $('codeInput').value = cleanCode(location.hash.substring(1));
+  setStatus('জয়েন চাপুন');
+}
+</script>
 </body>
 </html>
